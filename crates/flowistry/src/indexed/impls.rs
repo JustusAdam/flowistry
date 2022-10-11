@@ -63,6 +63,14 @@ impl LocationDomain {
     })
   }
 
+  pub fn from_raw(domain: DefaultDomain<LocationIndex, Location>, arg_block: BasicBlock, real_locations: usize) -> Self {
+    Self {domain, arg_block, real_locations}
+  }
+
+  pub fn arg_block(&self) -> BasicBlock {
+    self.arg_block
+  }
+
   pub fn num_real_locations(&self) -> usize {
     self.real_locations
   }
