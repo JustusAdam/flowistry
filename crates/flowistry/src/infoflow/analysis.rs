@@ -7,7 +7,7 @@ use rustc_middle::{
   mir::{visit::Visitor, *},
   ty::TyCtxt,
 };
-use rustc_mir_dataflow::{Analysis, AnalysisDomain, Forward};
+use rustc_mir_dataflow::{Analysis, AnalysisDomain, Forward, JoinSemiLattice};
 
 use super::{
   mutation::{ModularMutationVisitor, MutationStatus},
@@ -17,7 +17,7 @@ use crate::{
   extensions::{is_extension_active, ContextMode, MutabilityMode},
   indexed::{
     impls::{LocationDomain, LocationSet},
-    IndexMatrix, IndexedDomain,
+    IndexMatrix, IndexedDomain, RefSet, IndexSet
   },
   mir::{
     aliases::Aliases,
@@ -26,24 +26,92 @@ use crate::{
   },
 };
 
+pub type FlowDomainMatrix<'tcx> = IndexMatrix<Place<'tcx>, Location>;
+
 /// Represents the information flow at a given instruction.
 ///
 /// Places are mapped to sets of locations which could influence the value of that place.
 /// This data structure is analogous to $\Theta$ in the formalism, where $p$ is a [`Place`]
 /// and $\kappa$ is a [`LocationSet`]. If $p \mapsto \kappa \in \Theta$, you can access $\kappa$
 /// with `domain.row_set(p)`.
-pub type FlowDomain<'tcx> = IndexMatrix<Place<'tcx>, Location>;
+pub type TransitiveFlowDomain<'tcx> = FlowDomainMatrix<'tcx>;
 
-pub struct FlowAnalysis<'a, 'tcx> {
+#[derive(PartialEq, Eq, Clone)]
+pub struct NonTransitiveFlowDomain<'tcx> {
+  matrix: FlowDomainMatrix<'tcx>,
+  overrides: HashMap<Place<'tcx>, Location>,
+}
+
+pub trait FlowDomain<'tcx> : JoinSemiLattice + Clone {
+  fn matrix(&self) -> &FlowDomainMatrix<'tcx>;
+  fn matrix_mut(&mut self) -> &mut FlowDomainMatrix<'tcx>;
+  fn row<'a>(&'a self, row: Place<'tcx>) -> IndexSet<Location, RefSet<'a, Location>>;
+  fn union_after<S:crate::indexed::ToSet<Location>>(&mut self, row: Place<'tcx>, from: &IndexSet<Location, S>, at: Location)  -> bool;
+  fn from_location_domain(dom: &Rc<LocationDomain>) -> Self;
+}
+
+impl <'tcx> FlowDomain<'tcx> for TransitiveFlowDomain<'tcx> {
+  fn matrix(&self) -> &FlowDomainMatrix<'tcx> {
+      self
+  }
+  fn matrix_mut<'a>(&mut self) -> &mut FlowDomainMatrix<'tcx> {
+    self
+  }
+  fn row<'a>(&'a self, row: Place<'tcx>) -> IndexSet<Location, RefSet<'a, Location>> {
+    self.row_set(row)
+  }
+  fn union_after<S:crate::indexed::ToSet<Location>>(&mut self, row: Place<'tcx>, from: &IndexSet<Location, S>, _at: Location)  -> bool {
+    self.union_into_row(row, from)
+  }
+  fn from_location_domain(dom: &Rc<LocationDomain>) -> Self {
+    Self::new(dom)
+  }
+}
+
+impl <'tcx> FlowDomain<'tcx> for NonTransitiveFlowDomain<'tcx> {
+  fn matrix(&self) -> &FlowDomainMatrix<'tcx> {
+      &self.matrix
+  }
+  fn matrix_mut<'a>(&mut self) -> &mut FlowDomainMatrix<'tcx> {
+      &mut self.matrix
+  }
+  fn row<'a>(&'a self, row: Place<'tcx>) -> IndexSet<Location, RefSet<'a, Location>> {
+    self.matrix.row_set(row)
+  }
+  fn union_after<S:crate::indexed::ToSet<Location>>(&mut self, row: Place<'tcx>, _from: &IndexSet<Location, S>, at: Location)  -> bool {
+    self.overrides.insert(row, at).is_none()
+  }
+  fn from_location_domain(dom: &Rc<LocationDomain>) -> Self {
+    Self {
+      matrix: FlowDomainMatrix::new(dom),
+      overrides: HashMap::default(),
+    }
+  }
+}
+
+impl <'tcx> JoinSemiLattice for NonTransitiveFlowDomain<'tcx> {
+  fn join(&mut self, other: &Self) -> bool {
+    other.matrix.rows().any(|(r, s)|
+      if let Some(l) = other.overrides.get(&r) {
+        self.matrix.insert(r, l)
+      } else {
+        false
+      } || self.matrix.union_into_row(r, &s)
+  )
+  }
+}
+
+
+pub struct FlowAnalysis<'a, 'tcx, D: FlowDomain<'tcx> > {
   pub tcx: TyCtxt<'tcx>,
   pub def_id: DefId,
   pub body: &'a Body<'tcx>,
   pub control_dependencies: ControlDependencies,
   pub aliases: Aliases<'a, 'tcx>,
-  crate recurse_cache: RefCell<HashMap<BodyId, FlowResults<'a, 'tcx>>>,
+  crate recurse_cache: RefCell<HashMap<BodyId, FlowResults<'a, 'tcx, D>>>,
 }
 
-impl<'a, 'tcx> FlowAnalysis<'a, 'tcx> {
+impl<'a, 'tcx, D: FlowDomain<'tcx>> FlowAnalysis<'a, 'tcx, D> {
   pub fn new(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
@@ -68,7 +136,7 @@ impl<'a, 'tcx> FlowAnalysis<'a, 'tcx> {
 
   crate fn transfer_function(
     &self,
-    state: &mut FlowDomain<'tcx>,
+    state: &mut D,
     mutated: Place<'tcx>,
     inputs: &[(Place<'tcx>, Option<PlaceElem<'tcx>>)],
     location: Location,
@@ -87,7 +155,7 @@ impl<'a, 'tcx> FlowAnalysis<'a, 'tcx> {
     {
       let mutated_direct = mutated_aliases.iter().next().unwrap();
       for sub in all_aliases.children(*mutated_direct).iter() {
-        state.clear_row(all_aliases.normalize(*sub));
+        state.matrix_mut().clear_row(all_aliases.normalize(*sub));
       }
     }
 
@@ -106,7 +174,7 @@ impl<'a, 'tcx> FlowAnalysis<'a, 'tcx> {
               .iter()
           });
       for relevant in reachable_values.iter().chain(provenance) {
-        let deps = state.row_set(all_aliases.normalize(*relevant));
+        let deps = state.row(all_aliases.normalize(*relevant));
         trace!("    For relevant {relevant:?} for input {place:?} adding deps {deps:?}");
         location_deps.union(&deps);
       }
@@ -150,22 +218,23 @@ impl<'a, 'tcx> FlowAnalysis<'a, 'tcx> {
     }
 
     if children.len() > 0 {
+      unimplemented!()
       // In the special case of mutated = aggregate { x: .., y: .. }
       // then we ensure that deps(mutated.x) != deps(mutated)
 
       // First, ensure that all children have the current in their deps.
       // See test struct_read_constant for where this is needed.
-      for child in all_aliases.children(mutated) {
-        state.insert(all_aliases.normalize(child), location);
-      }
+      // for child in all_aliases.children(mutated) {
+      //   state.insert(all_aliases.normalize(child), location);
+      // }
 
-      // Then for constructor arguments that were places, add dependencies of those places.
-      for (child, deps) in children {
-        state.union_into_row(all_aliases.normalize(child), &deps);
-      }
+      // // Then for constructor arguments that were places, add dependencies of those places.
+      // for (child, deps) in children {
+      //   state.union_into_row(all_aliases.normalize(child), &deps);
+      // }
 
-      // Finally add input_location_deps *JUST* to mutated, not conflicts of mutated.
-      state.union_into_row(all_aliases.normalize(mutated), &input_location_deps);
+      // // Finally add input_location_deps *JUST* to mutated, not conflicts of mutated.
+      // state.union_into_row(all_aliases.normalize(mutated), &input_location_deps);
     } else {
       // Union dependencies into all conflicting places of the mutated place
       let mut mutable_conflicts = all_aliases.conflicts(mutated).to_owned();
@@ -193,19 +262,19 @@ impl<'a, 'tcx> FlowAnalysis<'a, 'tcx> {
       debug!("    with deps {input_location_deps:?}");
 
       for place in mutable_conflicts.into_iter() {
-        state.union_into_row(all_aliases.normalize(place), &input_location_deps);
+        state.union_after(all_aliases.normalize(place), &input_location_deps, location);
       }
     }
   }
 }
 
-impl<'a, 'tcx> AnalysisDomain<'tcx> for FlowAnalysis<'a, 'tcx> {
-  type Domain = FlowDomain<'tcx>;
+impl<'a, 'tcx, D: FlowDomain<'tcx>> AnalysisDomain<'tcx> for FlowAnalysis<'a, 'tcx, D> {
+  type Domain = D;
   type Direction = Forward;
   const NAME: &'static str = "FlowAnalysis";
 
   fn bottom_value(&self, _body: &Body<'tcx>) -> Self::Domain {
-    FlowDomain::new(self.location_domain())
+    FlowDomain::from_location_domain(self.location_domain())
   }
 
   fn initialize_start_block(&self, _body: &Body<'tcx>, state: &mut Self::Domain) {
@@ -215,13 +284,13 @@ impl<'a, 'tcx> AnalysisDomain<'tcx> for FlowAnalysis<'a, 'tcx> {
           "arg={arg:?} / place={place:?} / loc={:?}",
           self.location_domain().value(loc)
         );
-        state.insert(self.aliases.normalize(*place), loc);
+        state.matrix_mut().insert(self.aliases.normalize(*place), loc);
       }
     }
   }
 }
 
-impl<'a, 'tcx> Analysis<'tcx> for FlowAnalysis<'a, 'tcx> {
+impl<'a, 'tcx, D: FlowDomain<'tcx>> Analysis<'tcx> for FlowAnalysis<'a, 'tcx, D> {
   fn apply_statement_effect(
     &self,
     state: &mut Self::Domain,

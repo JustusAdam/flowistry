@@ -1,14 +1,15 @@
 //! The core information flow analysis.
 
-use std::cell::RefCell;
+use std::{cell::RefCell, os::unix::thread::JoinHandleExt};
 
 use log::debug;
 use rustc_borrowck::consumers::BodyWithBorrowckFacts;
 use rustc_hir::BodyId;
 use rustc_middle::ty::TyCtxt;
+use rustc_mir_dataflow::JoinSemiLattice;
 
 pub use self::{
-  analysis::{FlowAnalysis, FlowDomain},
+  analysis::{FlowAnalysis, FlowDomain, TransitiveFlowDomain, NonTransitiveFlowDomain, FlowDomainMatrix},
   dependencies::{compute_dependencies, compute_dependency_spans, Direction},
 };
 use crate::{
@@ -30,7 +31,7 @@ mod recursive;
 /// that could be influenced. The flow-sensitivity is encoded in the [`AnalysisResults`](engine::AnalysisResults) wrapper,
 /// which contains a [`FlowDomain`] for each [`Location`](rustc_middle::mir::Location) (accessed via [`state_at`](engine::AnalysisResults::state_at)).
 /// See [`FlowDomain`] for more on the actual information flow representation.
-pub type FlowResults<'a, 'tcx> = engine::AnalysisResults<'tcx, FlowAnalysis<'a, 'tcx>>;
+pub type FlowResults<'a, 'tcx, D> = engine::AnalysisResults<'tcx, FlowAnalysis<'a, 'tcx, D>>;
 
 thread_local! {
   pub static BODY_STACK: RefCell<Vec<BodyId>> =
@@ -44,7 +45,24 @@ pub fn compute_flow<'a, 'tcx>(
   tcx: TyCtxt<'tcx>,
   body_id: BodyId,
   body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
-) -> FlowResults<'a, 'tcx> {
+) -> FlowResults<'a, 'tcx, TransitiveFlowDomain<'tcx>> {
+  compute_flow_internal(tcx, body_id, body_with_facts)
+}
+
+
+pub fn compute_flow_nontransitive<'a, 'tcx>(
+  tcx: TyCtxt<'tcx>,
+  body_id: BodyId,
+  body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
+) -> FlowResults<'a, 'tcx, NonTransitiveFlowDomain<'tcx>> {
+  compute_flow_internal(tcx, body_id, body_with_facts)
+}
+
+fn compute_flow_internal<'a, 'tcx, D: FlowDomain<'tcx> + JoinSemiLattice>(
+  tcx: TyCtxt<'tcx>,
+  body_id: BodyId,
+  body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
+) -> FlowResults<'a, 'tcx, D> {
   BODY_STACK.with(|body_stack| {
     body_stack.borrow_mut().push(body_id);
     debug!(
@@ -65,7 +83,7 @@ pub fn compute_flow<'a, 'tcx>(
     let results = {
       block_timer!("Flow");
 
-      let analysis = FlowAnalysis::new(tcx, def_id, body, aliases, control_dependencies);
+      let analysis = FlowAnalysis::<D>::new(tcx, def_id, body, aliases, control_dependencies);
       engine::iterate_to_fixpoint(tcx, body, location_domain, analysis)
       // analysis.into_engine(tcx, body).iterate_to_fixpoint()
     };
@@ -74,7 +92,7 @@ pub fn compute_flow<'a, 'tcx>(
       let counts = body
         .all_locations()
         .flat_map(|loc| {
-          let state = results.state_at(loc);
+          let state = results.state_at(loc).matrix();
           state
             .rows()
             .map(|(_, locations)| locations.len())

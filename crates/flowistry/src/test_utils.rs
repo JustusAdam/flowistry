@@ -291,7 +291,7 @@ pub fn test_command_output(
   path: &Path,
   expected: Option<&Path>,
   output_fn: impl for<'a, 'hir, 'tcx> Fn(
-      infoflow::FlowResults<'a, 'tcx>,
+      infoflow::FlowResults<'a, 'tcx, infoflow::TransitiveFlowDomain<'tcx>>,
       Spanner<'hir, 'tcx>,
       Span,
     ) -> Vec<Span>

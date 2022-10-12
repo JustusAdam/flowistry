@@ -15,10 +15,10 @@ use crate::{
   },
 };
 
-impl<'tcx> FlowAnalysis<'_, 'tcx> {
+impl<'tcx, D:FlowDomain<'tcx>> FlowAnalysis<'_, 'tcx, D> {
   crate fn recurse_into_call(
     &self,
-    state: &mut FlowDomain<'tcx>,
+    state: &mut D,
     call: &TerminatorKind<'tcx>,
     location: Location,
   ) -> bool {
@@ -117,11 +117,11 @@ impl<'tcx> FlowAnalysis<'_, 'tcx> {
     let mut recurse_cache = self.recurse_cache.borrow_mut();
     let flow = recurse_cache.entry(body_id).or_insert_with(|| {
       info!("Recursing into {}", tcx.def_path_debug_str(*def_id));
-      super::compute_flow(tcx, body_id, body_with_facts)
+      super::compute_flow_internal(tcx, body_id, body_with_facts)
     });
     let body = &body_with_facts.body;
 
-    let mut return_state = FlowDomain::new(flow.analysis.location_domain());
+    let mut return_state = D::from_location_domain(flow.analysis.location_domain());
     {
       let return_locs = body
         .basic_blocks()
@@ -183,17 +183,18 @@ impl<'tcx> FlowAnalysis<'_, 'tcx> {
       Some(parent_arg_projected)
     };
 
-    for (child, _) in return_state.rows() {
+    for (child, _) in return_state.matrix().rows() {
       if let Some(parent) = translate_child_to_parent(child, true) {
         let was_return = child.local == RETURN_PLACE;
         // > 1 because arguments will always have their synthetic location in their dep set
-        let was_mutated = return_state.row_set(child).len() > 1;
+        let was_mutated = return_state.row(child).len() > 1;
         if !was_mutated && !was_return {
           continue;
         }
 
-        let child_deps = return_state.row_set(child);
+        let child_deps = return_state.row(child);
         let parent_deps = return_state
+          .matrix()
           .rows()
           .filter(|(_, deps)| child_deps.is_superset(deps))
           .filter_map(|(row, _)| Some((translate_child_to_parent(row, false)?, None)))

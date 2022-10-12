@@ -1,11 +1,12 @@
-use std::{cell::RefCell, iter};
+use std::{cell::RefCell, iter, os::unix::thread::JoinHandleExt};
 
 use either::Either;
 use log::{debug, trace};
 use rustc_middle::mir::{visit::Visitor, *};
+use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_span::Span;
 
-use super::{mutation::ModularMutationVisitor, FlowResults};
+use super::{mutation::ModularMutationVisitor, FlowResults, FlowDomain};
 use crate::{
   block_timer,
   indexed::impls::LocationSet,
@@ -27,9 +28,9 @@ struct TargetDeps {
 }
 
 impl TargetDeps {
-  pub fn new<'tcx>(
+  pub fn new<'tcx, D: FlowDomain<'tcx> + JoinSemiLattice>(
     targets: &[(Place<'tcx>, Location)],
-    results: &FlowResults<'_, 'tcx>,
+    results: &FlowResults<'_, 'tcx, D>,
   ) -> Self {
     let aliases = &results.analysis.aliases;
     let location_domain = results.analysis.location_domain();
@@ -56,7 +57,7 @@ impl TargetDeps {
         forward.insert_all();
         for conflict in aliases.children(aliases.normalize(place)) {
           // conflict should already be normalized because the input to aliases.children is normalized
-          let deps = state.row_set(conflict);
+          let deps = state.row(conflict);
           trace!("place={place:?}, conflict={conflict:?}, deps={deps:?}");
           forward.intersect(&deps);
         }
@@ -74,8 +75,8 @@ impl TargetDeps {
   }
 }
 
-pub fn compute_dependencies<'tcx>(
-  results: &FlowResults<'_, 'tcx>,
+pub fn compute_dependencies<'tcx, D: FlowDomain<'tcx> + JoinSemiLattice>(
+  results: &FlowResults<'_, 'tcx, D>,
   all_targets: Vec<Vec<(Place<'tcx>, Location)>>,
   direction: Direction,
 ) -> Vec<LocationSet> {
@@ -126,7 +127,7 @@ pub fn compute_dependencies<'tcx>(
     for location in body.all_locations() {
       let state = results.state_at(location);
       let check = |place| {
-        let deps = aliases.deps(state, place);
+        let deps = aliases.deps(state.matrix(), place);
 
         for (target_deps, outputs) in
           iter::zip(&all_target_deps, &mut *outputs.borrow_mut())
@@ -171,7 +172,7 @@ pub fn compute_dependencies<'tcx>(
           if location_domain.location_to_local(*location).is_some() {
             outputs.insert(location);
           } else {
-            let deps = aliases.deps(results.state_at(*location), *value);
+            let deps = aliases.deps(results.state_at(*location).matrix(), *value);
             outputs.union(&deps);
           }
         }
@@ -191,8 +192,8 @@ pub fn compute_dependencies<'tcx>(
   outputs.into_inner()
 }
 
-pub fn compute_dependency_spans<'tcx>(
-  results: &FlowResults<'_, 'tcx>,
+pub fn compute_dependency_spans<'tcx, D: FlowDomain<'tcx> + JoinSemiLattice>(
+  results: &FlowResults<'_, 'tcx, D>,
   targets: Vec<Vec<(Place<'tcx>, Location)>>,
   direction: Direction,
   spanner: &Spanner,
