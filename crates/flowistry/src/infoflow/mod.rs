@@ -9,7 +9,10 @@ use rustc_middle::ty::TyCtxt;
 use rustc_mir_dataflow::JoinSemiLattice;
 
 pub use self::{
-  analysis::{FlowAnalysis, FlowDomain, TransitiveFlowDomain, NonTransitiveFlowDomain, FlowDomainMatrix},
+  analysis::{
+    FlowAnalysis, FlowDomain, FlowDomainMatrix, NonTransitiveFlowDomain,
+    TransitiveFlowDomain,
+  },
   dependencies::{compute_dependencies, compute_dependency_spans, Direction},
 };
 use crate::{
@@ -31,7 +34,8 @@ mod recursive;
 /// that could be influenced. The flow-sensitivity is encoded in the [`AnalysisResults`](engine::AnalysisResults) wrapper,
 /// which contains a [`FlowDomain`] for each [`Location`](rustc_middle::mir::Location) (accessed via [`state_at`](engine::AnalysisResults::state_at)).
 /// See [`FlowDomain`] for more on the actual information flow representation.
-pub type FlowResults<'a, 'tcx, D> = engine::AnalysisResults<'tcx, FlowAnalysis<'a, 'tcx, D>>;
+pub type FlowResults<'a, 'tcx, D> =
+  engine::AnalysisResults<'tcx, FlowAnalysis<'a, 'tcx, D>>;
 
 thread_local! {
   pub static BODY_STACK: RefCell<Vec<BodyId>> =
@@ -48,7 +52,6 @@ pub fn compute_flow<'a, 'tcx>(
 ) -> FlowResults<'a, 'tcx, TransitiveFlowDomain<'tcx>> {
   compute_flow_internal(tcx, body_id, body_with_facts)
 }
-
 
 pub fn compute_flow_nontransitive<'a, 'tcx>(
   tcx: TyCtxt<'tcx>,

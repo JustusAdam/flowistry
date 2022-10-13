@@ -6,7 +6,7 @@ use rustc_middle::mir::{visit::Visitor, *};
 use rustc_mir_dataflow::JoinSemiLattice;
 use rustc_span::Span;
 
-use super::{mutation::ModularMutationVisitor, FlowResults, FlowDomain};
+use super::{mutation::ModularMutationVisitor, FlowDomain, FlowResults};
 use crate::{
   block_timer,
   indexed::impls::LocationSet,

@@ -47,7 +47,10 @@ pub enum IssueFound {
   No,
 }
 
-pub fn analyze<'tcx>(body_id: &BodyId, results: &FlowResults<'_, 'tcx,TransitiveFlowDomain<'tcx>>) -> Result<IssueFound> {
+pub fn analyze<'tcx>(
+  body_id: &BodyId,
+  results: &FlowResults<'_, 'tcx, TransitiveFlowDomain<'tcx>>,
+) -> Result<IssueFound> {
   let tcx = results.analysis.tcx;
   let body = results.analysis.body;
   let def_id = tcx.hir().body_owner_def_id(*body_id).to_def_id();

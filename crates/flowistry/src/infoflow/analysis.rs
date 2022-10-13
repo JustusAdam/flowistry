@@ -17,7 +17,7 @@ use crate::{
   extensions::{is_extension_active, ContextMode, MutabilityMode},
   indexed::{
     impls::{LocationDomain, LocationSet},
-    IndexMatrix, IndexedDomain, RefSet, IndexSet
+    IndexMatrix, IndexSet, IndexedDomain, RefSet,
   },
   mir::{
     aliases::Aliases,
@@ -42,17 +42,22 @@ pub struct NonTransitiveFlowDomain<'tcx> {
   overrides: HashMap<Place<'tcx>, Location>,
 }
 
-pub trait FlowDomain<'tcx> : JoinSemiLattice + Clone {
+pub trait FlowDomain<'tcx>: JoinSemiLattice + Clone {
   fn matrix(&self) -> &FlowDomainMatrix<'tcx>;
   fn matrix_mut(&mut self) -> &mut FlowDomainMatrix<'tcx>;
   fn row<'a>(&'a self, row: Place<'tcx>) -> IndexSet<Location, RefSet<'a, Location>>;
-  fn union_after<S:crate::indexed::ToSet<Location>>(&mut self, row: Place<'tcx>, from: &IndexSet<Location, S>, at: Location)  -> bool;
+  fn union_after<S: crate::indexed::ToSet<Location>>(
+    &mut self,
+    row: Place<'tcx>,
+    from: &IndexSet<Location, S>,
+    at: Location,
+  ) -> bool;
   fn from_location_domain(dom: &Rc<LocationDomain>) -> Self;
 }
 
-impl <'tcx> FlowDomain<'tcx> for TransitiveFlowDomain<'tcx> {
+impl<'tcx> FlowDomain<'tcx> for TransitiveFlowDomain<'tcx> {
   fn matrix(&self) -> &FlowDomainMatrix<'tcx> {
-      self
+    self
   }
   fn matrix_mut<'a>(&mut self) -> &mut FlowDomainMatrix<'tcx> {
     self
@@ -60,7 +65,12 @@ impl <'tcx> FlowDomain<'tcx> for TransitiveFlowDomain<'tcx> {
   fn row<'a>(&'a self, row: Place<'tcx>) -> IndexSet<Location, RefSet<'a, Location>> {
     self.row_set(row)
   }
-  fn union_after<S:crate::indexed::ToSet<Location>>(&mut self, row: Place<'tcx>, from: &IndexSet<Location, S>, _at: Location)  -> bool {
+  fn union_after<S: crate::indexed::ToSet<Location>>(
+    &mut self,
+    row: Place<'tcx>,
+    from: &IndexSet<Location, S>,
+    _at: Location,
+  ) -> bool {
     self.union_into_row(row, from)
   }
   fn from_location_domain(dom: &Rc<LocationDomain>) -> Self {
@@ -68,17 +78,22 @@ impl <'tcx> FlowDomain<'tcx> for TransitiveFlowDomain<'tcx> {
   }
 }
 
-impl <'tcx> FlowDomain<'tcx> for NonTransitiveFlowDomain<'tcx> {
+impl<'tcx> FlowDomain<'tcx> for NonTransitiveFlowDomain<'tcx> {
   fn matrix(&self) -> &FlowDomainMatrix<'tcx> {
-      &self.matrix
+    &self.matrix
   }
   fn matrix_mut<'a>(&mut self) -> &mut FlowDomainMatrix<'tcx> {
-      &mut self.matrix
+    &mut self.matrix
   }
   fn row<'a>(&'a self, row: Place<'tcx>) -> IndexSet<Location, RefSet<'a, Location>> {
     self.matrix.row_set(row)
   }
-  fn union_after<S:crate::indexed::ToSet<Location>>(&mut self, row: Place<'tcx>, _from: &IndexSet<Location, S>, at: Location)  -> bool {
+  fn union_after<S: crate::indexed::ToSet<Location>>(
+    &mut self,
+    row: Place<'tcx>,
+    _from: &IndexSet<Location, S>,
+    at: Location,
+  ) -> bool {
     self.overrides.insert(row, at).is_none()
   }
   fn from_location_domain(dom: &Rc<LocationDomain>) -> Self {
@@ -89,7 +104,7 @@ impl <'tcx> FlowDomain<'tcx> for NonTransitiveFlowDomain<'tcx> {
   }
 }
 
-impl <'tcx> JoinSemiLattice for NonTransitiveFlowDomain<'tcx> {
+impl<'tcx> JoinSemiLattice for NonTransitiveFlowDomain<'tcx> {
   fn join(&mut self, other: &Self) -> bool {
     let mut changed = false;
     other.matrix.rows().for_each(|(r, s)| {
@@ -99,13 +114,15 @@ impl <'tcx> JoinSemiLattice for NonTransitiveFlowDomain<'tcx> {
         self.matrix.union_into_row(r, &s)
       };
     });
-    other.overrides.iter().for_each(|(p, l)| changed |= self.matrix.insert(*p, *l));
+    other
+      .overrides
+      .iter()
+      .for_each(|(p, l)| changed |= self.matrix.insert(*p, *l));
     changed
   }
 }
 
-
-pub struct FlowAnalysis<'a, 'tcx, D: FlowDomain<'tcx> > {
+pub struct FlowAnalysis<'a, 'tcx, D: FlowDomain<'tcx>> {
   pub tcx: TyCtxt<'tcx>,
   pub def_id: DefId,
   pub body: &'a Body<'tcx>,
@@ -287,7 +304,9 @@ impl<'a, 'tcx, D: FlowDomain<'tcx>> AnalysisDomain<'tcx> for FlowAnalysis<'a, 't
           "arg={arg:?} / place={place:?} / loc={:?}",
           self.location_domain().value(loc)
         );
-        state.matrix_mut().insert(self.aliases.normalize(*place), loc);
+        state
+          .matrix_mut()
+          .insert(self.aliases.normalize(*place), loc);
       }
     }
   }

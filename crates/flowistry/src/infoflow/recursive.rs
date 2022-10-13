@@ -15,7 +15,7 @@ use crate::{
   },
 };
 
-impl<'tcx, D:FlowDomain<'tcx>> FlowAnalysis<'_, 'tcx, D> {
+impl<'tcx, D: FlowDomain<'tcx>> FlowAnalysis<'_, 'tcx, D> {
   crate fn recurse_into_call(
     &self,
     state: &mut D,
