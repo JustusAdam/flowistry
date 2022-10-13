@@ -91,13 +91,16 @@ impl <'tcx> FlowDomain<'tcx> for NonTransitiveFlowDomain<'tcx> {
 
 impl <'tcx> JoinSemiLattice for NonTransitiveFlowDomain<'tcx> {
   fn join(&mut self, other: &Self) -> bool {
-    other.matrix.rows().any(|(r, s)|
-      if let Some(l) = other.overrides.get(&r) {
-        self.matrix.insert(r, l)
-      } else {
+    let mut changed = false;
+    other.matrix.rows().for_each(|(r, s)| {
+      changed |= if other.overrides.contains_key(&r) {
         false
-      } || self.matrix.union_into_row(r, &s)
-  )
+      } else {
+        self.matrix.union_into_row(r, &s)
+      };
+    });
+    other.overrides.iter().for_each(|(p, l)| changed |= self.matrix.insert(*p, *l));
+    changed
   }
 }
 
