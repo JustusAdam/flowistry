@@ -453,6 +453,10 @@ impl<R: RowBounds, C: IndexedValue> IndexMatrix<R, C> {
       .flat_map(move |set| set.iter().map(move |idx| self.col_domain.value(idx)))
   }
 
+  pub fn try_row<'a>(&'a self, row: R) -> Option<impl Iterator<Item = &'a C> + 'a> {
+    self.matrix.get(&row).map(|set| set.iter().map(move | idx| self.col_domain.value(idx)))
+  }
+
   // This use to return Option<...> for the empty case, but in my experience it's usually fine to return an empty set
   // and reduces the amount of error handling at the user's end.
   pub fn row_set<'a>(&'a self, row: R) -> IndexSet<C, RefSet<'a, C>> {
