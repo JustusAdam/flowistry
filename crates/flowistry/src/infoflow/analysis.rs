@@ -42,6 +42,16 @@ pub struct NonTransitiveFlowDomain<'tcx> {
   overrides: HashMap<Place<'tcx>, Location>,
 }
 
+impl <'tcx> NonTransitiveFlowDomain<'tcx> {
+  fn override_(&mut self, row: Place<'tcx>, at: Location) -> bool {
+    let r = self.overrides.insert(row, at);
+    if let Some(old) = r {
+      debug!("Duplicate override for key {row:?}, old:{old:?} new:{at:?}");
+    }
+    r.is_none()
+  }
+}
+
 pub trait FlowDomain<'tcx>: JoinSemiLattice + Clone {
   fn matrix(&self) -> &FlowDomainMatrix<'tcx>;
   fn matrix_mut(&mut self) -> &mut FlowDomainMatrix<'tcx>;
@@ -53,6 +63,7 @@ pub trait FlowDomain<'tcx>: JoinSemiLattice + Clone {
     at: Location,
   ) -> bool;
   fn from_location_domain(dom: &Rc<LocationDomain>) -> Self;
+  fn include(&mut self, row: Place<'tcx>, at: Location) -> bool;
 }
 
 impl<'tcx> FlowDomain<'tcx> for TransitiveFlowDomain<'tcx> {
@@ -76,6 +87,9 @@ impl<'tcx> FlowDomain<'tcx> for TransitiveFlowDomain<'tcx> {
   fn from_location_domain(dom: &Rc<LocationDomain>) -> Self {
     Self::new(dom)
   }
+  fn include(&mut self, row: Place<'tcx>, at: Location) -> bool {
+      self.insert(row, at)
+  }
 }
 
 impl<'tcx> FlowDomain<'tcx> for NonTransitiveFlowDomain<'tcx> {
@@ -94,13 +108,16 @@ impl<'tcx> FlowDomain<'tcx> for NonTransitiveFlowDomain<'tcx> {
     _from: &IndexSet<Location, S>,
     at: Location,
   ) -> bool {
-    self.overrides.insert(row, at).is_none()
+    self.override_(row, at)
   }
   fn from_location_domain(dom: &Rc<LocationDomain>) -> Self {
     Self {
       matrix: FlowDomainMatrix::new(dom),
       overrides: HashMap::default(),
     }
+  }
+  fn include(&mut self, row: Place<'tcx>, at: Location) -> bool {
+    self.override_(row, at)
   }
 }
 
@@ -238,23 +255,22 @@ impl<'a, 'tcx, D: FlowDomain<'tcx>> FlowAnalysis<'a, 'tcx, D> {
     }
 
     if children.len() > 0 {
-      unimplemented!()
       // In the special case of mutated = aggregate { x: .., y: .. }
       // then we ensure that deps(mutated.x) != deps(mutated)
 
       // First, ensure that all children have the current in their deps.
       // See test struct_read_constant for where this is needed.
-      // for child in all_aliases.children(mutated) {
-      //   state.insert(all_aliases.normalize(child), location);
-      // }
+      for child in all_aliases.children(mutated) {
+        state.include(all_aliases.normalize(child), location);
+      }
 
-      // // Then for constructor arguments that were places, add dependencies of those places.
-      // for (child, deps) in children {
-      //   state.union_into_row(all_aliases.normalize(child), &deps);
-      // }
+      // Then for constructor arguments that were places, add dependencies of those places.
+      for (child, deps) in children {
+        state.union_after(all_aliases.normalize(child), &deps, location);
+      }
 
-      // // Finally add input_location_deps *JUST* to mutated, not conflicts of mutated.
-      // state.union_into_row(all_aliases.normalize(mutated), &input_location_deps);
+      // Finally add input_location_deps *JUST* to mutated, not conflicts of mutated.
+      state.union_after(all_aliases.normalize(mutated), &input_location_deps, location);
     } else {
       // Union dependencies into all conflicting places of the mutated place
       let mut mutable_conflicts = all_aliases.conflicts(mutated).to_owned();
