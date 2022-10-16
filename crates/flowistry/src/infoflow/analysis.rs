@@ -42,7 +42,7 @@ pub struct NonTransitiveFlowDomain<'tcx> {
   overrides: HashMap<Place<'tcx>, Location>,
 }
 
-impl <'tcx> NonTransitiveFlowDomain<'tcx> {
+impl<'tcx> NonTransitiveFlowDomain<'tcx> {
   fn override_(&mut self, row: Place<'tcx>, at: Location) -> bool {
     let r = self.overrides.insert(row, at);
     if let Some(old) = r {
@@ -88,7 +88,7 @@ impl<'tcx> FlowDomain<'tcx> for TransitiveFlowDomain<'tcx> {
     Self::new(dom)
   }
   fn include(&mut self, row: Place<'tcx>, at: Location) -> bool {
-      self.insert(row, at)
+    self.insert(row, at)
   }
 }
 
@@ -270,7 +270,11 @@ impl<'a, 'tcx, D: FlowDomain<'tcx>> FlowAnalysis<'a, 'tcx, D> {
       }
 
       // Finally add input_location_deps *JUST* to mutated, not conflicts of mutated.
-      state.union_after(all_aliases.normalize(mutated), &input_location_deps, location);
+      state.union_after(
+        all_aliases.normalize(mutated),
+        &input_location_deps,
+        location,
+      );
     } else {
       // Union dependencies into all conflicting places of the mutated place
       let mut mutable_conflicts = all_aliases.conflicts(mutated).to_owned();
