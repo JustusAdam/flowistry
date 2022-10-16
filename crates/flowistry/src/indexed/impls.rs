@@ -40,18 +40,26 @@ pub fn arg_location<'tcx>(place: Place<'tcx>, body: &Body<'tcx>) -> Option<Locat
   })
 }
 
+/// Returns the fake locations we are going to use for arguments for this body.
+/// They are guaranteed not to interfere with any actual locations in the body.
+pub fn arg_locations(body: &Body) -> (BasicBlock, impl Iterator<Item = Location>) {
+  let arg_block = BasicBlock::from_usize(body.basic_blocks().len());
+  (
+    arg_block,
+    (0 .. body.arg_count).map(move |i| Location {
+      block: arg_block,
+      statement_index: i + 1,
+    }),
+  )
+}
+
 impl LocationDomain {
   pub fn new(body: &Body) -> Rc<Self> {
     let mut locations = body.all_locations().collect::<Vec<_>>();
 
-    let arg_block = BasicBlock::from_usize(body.basic_blocks().len());
-
     let real_locations = locations.len();
+    let (arg_block, arg_locations) = arg_locations(body);
 
-    let arg_locations = (0 .. body.arg_count).map(|i| Location {
-      block: arg_block,
-      statement_index: i + 1,
-    });
     locations.extend(arg_locations);
 
     let domain = DefaultDomain::new(locations);
