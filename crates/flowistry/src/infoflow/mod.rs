@@ -1,6 +1,6 @@
 //! The core information flow analysis.
 
-use std::{cell::RefCell, os::unix::thread::JoinHandleExt};
+use std::cell::RefCell;
 
 use log::debug;
 use rustc_borrowck::consumers::BodyWithBorrowckFacts;

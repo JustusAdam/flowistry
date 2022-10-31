@@ -3,7 +3,6 @@ use rustc_middle::{
   mir::*,
   ty::{subst::GenericArgKind, ClosureKind, TyKind},
 };
-use rustc_mir_dataflow::JoinSemiLattice;
 
 use super::{analysis::FlowAnalysis, BODY_STACK};
 use crate::{

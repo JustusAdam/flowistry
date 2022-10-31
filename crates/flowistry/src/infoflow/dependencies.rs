@@ -1,4 +1,4 @@
-use std::{cell::RefCell, iter, os::unix::thread::JoinHandleExt};
+use std::{cell::RefCell, iter};
 
 use either::Either;
 use log::{debug, trace};
