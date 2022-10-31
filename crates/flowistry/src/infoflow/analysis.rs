@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use rustc_data_structures::fx::{FxHashMap as HashMap, FxHashSet as HashSet};
 use rustc_hir::{def_id::DefId, BodyId};
 use rustc_middle::{
@@ -46,7 +46,9 @@ impl<'tcx> NonTransitiveFlowDomain<'tcx> {
   fn override_(&mut self, row: Place<'tcx>, at: Location) -> bool {
     let r = self.overrides.insert(row, at);
     if let Some(old) = r {
-      debug!("Duplicate override for key {row:?}, old:{old:?} new:{at:?}");
+      if old != at {
+        warn!("Duplicate override for key {row:?}, old:{old:?} new:{at:?}");
+      }
     }
     r.is_none()
   }
