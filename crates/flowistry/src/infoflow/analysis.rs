@@ -62,6 +62,7 @@ pub trait FlowDomain<'tcx>: JoinSemiLattice + Clone {
     &mut self,
     row: Place<'tcx>,
     from: &IndexSet<Location, S>,
+    from_ctrl: &IndexSet<Location, S>, // contains control dependencies for a Location
     at: Location,
   ) -> bool;
   fn from_location_domain(dom: &Rc<LocationDomain>) -> Self;
@@ -82,6 +83,7 @@ impl<'tcx> FlowDomain<'tcx> for TransitiveFlowDomain<'tcx> {
     &mut self,
     row: Place<'tcx>,
     from: &IndexSet<Location, S>,
+    _from_ctrl: &IndexSet<Location, S>,
     _at: Location,
   ) -> bool {
     self.union_into_row(row, from)
@@ -108,9 +110,11 @@ impl<'tcx> FlowDomain<'tcx> for NonTransitiveFlowDomain<'tcx> {
     &mut self,
     row: Place<'tcx>,
     _from: &IndexSet<Location, S>,
+    from_ctrl: &IndexSet<Location, S>,
     at: Location,
   ) -> bool {
-    self.override_(row, at)
+    let union_into_row = self.matrix.union_into_row(row, from_ctrl); 
+    self.override_(row, at) && union_into_row
   }
   fn from_location_domain(dom: &Rc<LocationDomain>) -> Self {
     Self {
@@ -243,9 +247,12 @@ impl<'a, 'tcx, D: FlowDomain<'tcx>> FlowAnalysis<'a, 'tcx, D> {
 
     // Add control dependencies
     let controlled_by = self.control_dependencies.dependent_on(location.block);
+    let mut ctrl_location_deps = LocationSet::new(location_domain);
+
     let body = self.body;
     for block in controlled_by.into_iter().flat_map(|set| set.iter()) {
       input_location_deps.insert(body.terminator_loc(block));
+      ctrl_location_deps.insert(body.terminator_loc(block));
 
       // Include dependencies of the switch's operand
       let terminator = body.basic_blocks()[block].terminator();
@@ -268,14 +275,14 @@ impl<'a, 'tcx, D: FlowDomain<'tcx>> FlowAnalysis<'a, 'tcx, D> {
 
       // Then for constructor arguments that were places, add dependencies of those places.
       for (child, deps) in children {
-        state.union_after(all_aliases.normalize(child), &deps, location);
+        state.union_after(all_aliases.normalize(child), &deps, &ctrl_location_deps, location);
       }
 
       // Finally add input_location_deps *JUST* to mutated, not conflicts of mutated.
       state.union_after(
         all_aliases.normalize(mutated),
         &input_location_deps,
-        location,
+        &ctrl_location_deps, location,
       );
     } else {
       // Union dependencies into all conflicting places of the mutated place
@@ -304,7 +311,7 @@ impl<'a, 'tcx, D: FlowDomain<'tcx>> FlowAnalysis<'a, 'tcx, D> {
       debug!("    with deps {input_location_deps:?}");
 
       for place in mutable_conflicts.into_iter() {
-        state.union_after(all_aliases.normalize(place), &input_location_deps, location);
+        state.union_after(all_aliases.normalize(place), &input_location_deps, &ctrl_location_deps, location);
       }
     }
   }
