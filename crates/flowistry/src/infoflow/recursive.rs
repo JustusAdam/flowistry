@@ -6,7 +6,7 @@ use rustc_middle::{
 
 use super::{analysis::FlowAnalysis, BODY_STACK};
 use crate::{
-  extensions::REACHED_LIBRARY,
+  extensions::{REACHED_LIBRARY, RECURSE_SELECTOR},
   infoflow::{mutation::MutationStatus, FlowDomain},
   mir::{
     borrowck_facts::get_body_with_borrowck_facts,
@@ -21,6 +21,10 @@ impl<'tcx, D: FlowDomain<'tcx>> FlowAnalysis<'_, 'tcx, D> {
     call: &TerminatorKind<'tcx>,
     location: Location,
   ) -> bool {
+    if !RECURSE_SELECTOR.get(|rs| rs.map_or(true, 
+      |select| select.is_selected(self.tcx, call))) {
+      return false;
+    }
     let tcx = self.tcx;
     let (func, parent_args, destination) = match call {
       TerminatorKind::Call {

@@ -2,6 +2,8 @@
 use std::{cell::RefCell, str::FromStr};
 
 use fluid_let::fluid_let;
+pub use fluid_let::fluid_set;
+use rustc_middle::{mir::TerminatorKind, ty::TyCtxt};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Deserialize, Serialize, Hash)]
@@ -72,8 +74,13 @@ impl Default for EvalMode {
   }
 }
 
+pub trait RecurseSelector {
+  fn is_selected<'tcx>(&self, tcx: TyCtxt<'tcx>, tk: &TerminatorKind<'tcx>) -> bool;
+}
+
 fluid_let!(pub static EVAL_MODE: EvalMode);
 fluid_let!(pub static REACHED_LIBRARY: RefCell<bool>);
+fluid_let!(pub static RECURSE_SELECTOR: Box<dyn RecurseSelector>);
 
 pub fn is_extension_active(f: impl Fn(EvalMode) -> bool) -> bool {
   EVAL_MODE.copied().map(f).unwrap_or(false)
