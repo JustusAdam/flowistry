@@ -640,6 +640,10 @@ impl<'tcx> TypeVisitor<'tcx> for LoanCollector<'_, 'tcx> {
       RegionKind::ReErased => {
         return ControlFlow::Continue(());
       }
+      RegionKind::ReLateBound(..) => {
+        debug!("Skipping late bound region {:?}", region);
+        return ControlFlow::Continue(())
+      }
       _ => unreachable!("{region:?}"),
     };
     if let Some(loans) = self.aliases.loans.get(&region) {
