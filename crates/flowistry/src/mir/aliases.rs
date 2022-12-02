@@ -160,15 +160,25 @@ rustc_index::newtype_index! {
 }
 
 impl<'a, 'tcx> Aliases<'a, 'tcx> {
-  fn compute_loans(
+  fn compute_loans<F: Fn(RegionVid, RegionVid) -> bool>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
     body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
+    constraint_selector: F
   ) -> LoanMap<'tcx> {
     let start = Instant::now();
     let body = &body_with_facts.body;
     let static_region = RegionVid::from_usize(0);
-    let subset_base = &body_with_facts.input_facts.subset_base;
+    // Core set of outlives constraints (points interpretation)
+    let ref subset_base = 
+      body_with_facts.input_facts.subset_base
+      .iter()
+      .cloned()
+      .filter(|(r1, r2, _)| constraint_selector(*r1, *r2))
+      .collect::<Vec<_>>();
+    // Might be able to cut off propagation by deleting from the base set of facts here or as appropriate.
+    // rustc will have a pass like the one I want already, can use their code, augmented as needed.
+    // look at rustc_borrowchk::type_check::mod
 
     let all_pointers = body
       .local_decls()
@@ -391,18 +401,27 @@ impl<'a, 'tcx> Aliases<'a, 'tcx> {
     );
     contains
   }
-
+  
   pub fn build(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
     body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
+  ) -> Self {
+    Self::build_with_fact_selection(tcx, def_id, body_with_facts, |_, _| true)
+  }
+
+  pub fn build_with_fact_selection<F: Fn(RegionVid, RegionVid) -> bool>(
+    tcx: TyCtxt<'tcx>,
+    def_id: DefId,
+    body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
+    fact_selector: F
   ) -> Self {
     block_timer!("aliases");
     let body = &body_with_facts.body;
 
     let location_domain = LocationDomain::new(body);
 
-    let loans = Self::compute_loans(tcx, def_id, body_with_facts);
+    let loans = Self::compute_loans(tcx, def_id, body_with_facts, fact_selector);
     debug!("Loans: {loans:?}");
 
     Aliases {
