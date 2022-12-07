@@ -289,7 +289,7 @@ mod test {
         .into_iter()
         .map(test_utils::make_span)
         .collect::<Vec<_>>();
-      f(tcx, body_id, &body_with_facts.body, spans);
+      f(tcx, body_id, body_with_facts.simplified_body(), spans);
     });
   }
 
@@ -421,7 +421,7 @@ mod test {
 }"#;
     let (input, _ranges) = test_utils::parse_ranges(src, [("`(", ")`")]).unwrap();
     test_utils::compile_body(input, move |tcx, body_id, body_with_facts| {
-      let body = &body_with_facts.body;
+      let body = body_with_facts.simplified_body();
       let location_domain = LocationDomain::new(body);
       let source_map = tcx.sess.source_map();
 

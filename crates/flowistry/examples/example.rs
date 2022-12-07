@@ -26,7 +26,7 @@ use std::process::Command;
 use flowistry::{
   infoflow::Direction,
   mir::{
-    borrowck_facts,
+    borrowck_facts::{self, CachedSimplifedBodyWithFacts},
     utils::{BodyExt, PlaceExt, SpanExt},
   },
   source_map::{EnclosingHirSpans, Spanner},
@@ -44,9 +44,9 @@ use rustc_span::Span;
 fn analysis<'tcx>(
   tcx: TyCtxt<'tcx>,
   body_id: BodyId,
-  body_with_facts: &BodyWithBorrowckFacts<'tcx>,
+  body_with_facts: &CachedSimplifedBodyWithFacts<'tcx>,
 ) {
-  println!("Body:\n{}", body_with_facts.body.to_string(tcx).unwrap());
+  println!("Body:\n{}", body_with_facts.simplified_body().to_string(tcx).unwrap());
 
   // This computes the core information flow data structure. But it's not very
   // visualizable, so we need to post-process it with a specific query.
@@ -74,7 +74,7 @@ fn analysis<'tcx>(
   //    mapping MIR back to source. That's the Spanner class and the
   //    location_to_span method.
   println!("The forward dependencies of targets {targets:?} are:");
-  let body = &body_with_facts.body;
+  let body = body_with_facts.simplified_body();
   let spanner = Spanner::new(tcx, body_id, body);
   let source_map = tcx.sess.source_map();
   for location in location_deps.iter() {

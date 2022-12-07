@@ -15,7 +15,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::{
   extensions::{ContextMode, EvalMode, MutabilityMode, PointerMode, EVAL_MODE},
   infoflow::{self},
-  mir::{borrowck_facts, utils::BodyExt},
+  mir::{borrowck_facts::{self, CachedSimplifedBodyWithFacts}, utils::BodyExt},
   source_map::{find_enclosing_bodies, GraphemeIndices, Range, Spanner, ToSpan},
 };
 
@@ -45,7 +45,7 @@ lazy_static::lazy_static! {
 pub fn compile_body_with_range(
   input: impl Into<String>,
   target: impl ToSpan,
-  callback: impl for<'tcx> FnOnce(TyCtxt<'tcx>, BodyId, &BodyWithBorrowckFacts<'tcx>) + Send,
+  callback: impl for<'tcx> FnOnce(TyCtxt<'tcx>, BodyId, &CachedSimplifedBodyWithFacts<'tcx>) + Send,
 ) {
   compile(input, |tcx| {
     let body_id = find_enclosing_bodies(tcx, target.to_span(tcx).unwrap())
@@ -53,7 +53,7 @@ pub fn compile_body_with_range(
       .unwrap();
     let def_id = tcx.hir().body_owner_def_id(body_id);
     let body_with_facts = borrowck_facts::get_body_with_borrowck_facts(tcx, def_id);
-    debug!("{}", body_with_facts.body.to_string(tcx).unwrap());
+    debug!("{}", body_with_facts.simplified_body().to_string(tcx).unwrap());
 
     callback(tcx, body_id, body_with_facts);
   })
@@ -61,7 +61,7 @@ pub fn compile_body_with_range(
 
 pub fn compile_body(
   input: impl Into<String>,
-  callback: impl for<'tcx> FnOnce(TyCtxt<'tcx>, BodyId, &BodyWithBorrowckFacts<'tcx>) + Send,
+  callback: impl for<'tcx> FnOnce(TyCtxt<'tcx>, BodyId, &CachedSimplifedBodyWithFacts<'tcx>) + Send,
 ) {
   compile(input, |tcx| {
     let hir = tcx.hir();
@@ -76,7 +76,7 @@ pub fn compile_body(
 
     let def_id = tcx.hir().body_owner_def_id(body_id);
     let body_with_facts = borrowck_facts::get_body_with_borrowck_facts(tcx, def_id);
-    debug!("{}", body_with_facts.body.to_string(tcx).unwrap());
+    debug!("{}", body_with_facts.simplified_body().to_string(tcx).unwrap());
 
     callback(tcx, body_id, body_with_facts);
   })
@@ -327,7 +327,7 @@ pub fn test_command_output(
 
         let target = target.to_span(tcx).unwrap();
         let results = infoflow::compute_flow(tcx, body_id, body_with_facts);
-        let spanner = Spanner::new(tcx, body_id, &body_with_facts.body);
+        let spanner = Spanner::new(tcx, body_id, body_with_facts.simplified_body());
 
         let actual = output_fn(results, spanner, target)
           .into_iter()

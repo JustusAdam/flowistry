@@ -18,7 +18,7 @@ pub use self::{
 use crate::{
   block_timer,
   mir::{
-    aliases::Aliases, control_dependencies::ControlDependencies, engine, utils::BodyExt,
+    aliases::Aliases, control_dependencies::ControlDependencies, engine, utils::BodyExt, borrowck_facts::CachedSimplifedBodyWithFacts,
   },
 };
 
@@ -48,7 +48,7 @@ thread_local! {
 pub fn compute_flow<'a, 'tcx>(
   tcx: TyCtxt<'tcx>,
   body_id: BodyId,
-  body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
+  body_with_facts: &'a CachedSimplifedBodyWithFacts<'tcx>,
 ) -> FlowResults<'a, 'tcx, TransitiveFlowDomain<'tcx>> {
   compute_flow_internal(tcx, body_id, body_with_facts)
 }
@@ -56,7 +56,7 @@ pub fn compute_flow<'a, 'tcx>(
 pub fn compute_flow_nontransitive<'a, 'tcx>(
   tcx: TyCtxt<'tcx>,
   body_id: BodyId,
-  body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
+  body_with_facts: &'a CachedSimplifedBodyWithFacts<'tcx>,
 ) -> FlowResults<'a, 'tcx, NonTransitiveFlowDomain<'tcx>> {
   compute_flow_internal(tcx, body_id, body_with_facts)
 }
@@ -64,7 +64,7 @@ pub fn compute_flow_nontransitive<'a, 'tcx>(
 fn compute_flow_internal<'a, 'tcx, D: FlowDomain<'tcx> + JoinSemiLattice>(
   tcx: TyCtxt<'tcx>,
   body_id: BodyId,
-  body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
+  body_with_facts: &'a CachedSimplifedBodyWithFacts<'tcx>,
 ) -> FlowResults<'a, 'tcx, D> {
   BODY_STACK.with(|body_stack| {
     body_stack.borrow_mut().push(body_id);
@@ -73,13 +73,13 @@ fn compute_flow_internal<'a, 'tcx, D: FlowDomain<'tcx> + JoinSemiLattice>(
       rustc_hir_pretty::to_string(rustc_hir_pretty::NO_ANN, |s| s
         .print_expr(&tcx.hir().body(body_id).value))
     );
-    debug!("{}", body_with_facts.body.to_string(tcx).unwrap());
+    debug!("{}", body_with_facts.simplified_body().to_string(tcx).unwrap());
 
     let def_id = tcx.hir().body_owner_def_id(body_id).to_def_id();
     let aliases = Aliases::build(tcx, def_id, body_with_facts);
     let location_domain = aliases.location_domain().clone();
 
-    let body = &body_with_facts.body;
+    let body = body_with_facts.simplified_body();
     let control_dependencies = ControlDependencies::build(body);
     debug!("Control dependencies: {control_dependencies:?}");
 

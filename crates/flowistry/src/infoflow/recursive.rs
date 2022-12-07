@@ -122,7 +122,7 @@ impl<'tcx, D: FlowDomain<'tcx>> FlowAnalysis<'_, 'tcx, D> {
       info!("Recursing into {}", tcx.def_path_debug_str(*def_id));
       super::compute_flow_internal(tcx, body_id, body_with_facts)
     });
-    let body = &body_with_facts.body;
+    let body = &body_with_facts.simplified_body();
 
     let mut return_state = D::from_location_domain(flow.analysis.location_domain());
     {

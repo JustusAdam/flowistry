@@ -35,6 +35,8 @@ use crate::{
   timer::elapsed,
 };
 
+use super::borrowck_facts::CachedSimplifedBodyWithFacts;
+
 #[derive(Default)]
 struct GatherBorrows<'tcx> {
   borrows: Vec<(RegionVid, BorrowKind, Place<'tcx>)>,
@@ -166,15 +168,15 @@ impl<'a, 'tcx> Aliases<'a, 'tcx> {
   fn compute_loans<F: Fn(RegionVid, RegionVid, BorrowckLocationIndex) -> bool>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
-    body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
+    body_with_facts: &'a CachedSimplifedBodyWithFacts<'tcx>,
     constraint_selector: F
   ) -> LoanMap<'tcx> {
     let start = Instant::now();
-    let body = &body_with_facts.body;
+    let body = &body_with_facts.simplified_body();
     let static_region = RegionVid::from_usize(0);
     // Core set of outlives constraints (points interpretation)
     let ref subset_base = 
-      body_with_facts.input_facts.subset_base
+      body_with_facts.input_facts().subset_base
       .iter()
       .cloned()
       .filter(|(r1, r2, i)| constraint_selector(*r1, *r2, *i))
@@ -226,7 +228,7 @@ impl<'a, 'tcx> Aliases<'a, 'tcx> {
 
       let constraints = generate_conservative_constraints(
         tcx,
-        &body_with_facts.body,
+        body_with_facts.simplified_body(),
         &region_to_pointers,
       );
 
@@ -244,7 +246,7 @@ impl<'a, 'tcx> Aliases<'a, 'tcx> {
     //   If p = p^[* p2]: definite('a, ty(p2), p2^[])
     //   Else:            definite('a, ty(p),  p^[]).
     let mut gather_borrows = GatherBorrows::default();
-    gather_borrows.visit_body(&body_with_facts.body);
+    gather_borrows.visit_body(body_with_facts.simplified_body());
     for (region, kind, place) in gather_borrows.borrows {
       if place.is_direct(body) {
         contains
@@ -408,7 +410,7 @@ impl<'a, 'tcx> Aliases<'a, 'tcx> {
   pub fn build(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
-    body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
+    body_with_facts: &'a CachedSimplifedBodyWithFacts<'tcx>,
   ) -> Self {
     Self::build_with_fact_selection(tcx, def_id, body_with_facts, |_, _, _| true)
   }
@@ -416,11 +418,11 @@ impl<'a, 'tcx> Aliases<'a, 'tcx> {
   pub fn build_with_fact_selection<F: Fn(RegionVid, RegionVid, BorrowckLocationIndex) -> bool>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
-    body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
+    body_with_facts: &'a CachedSimplifedBodyWithFacts<'tcx>,
     fact_selector: F
   ) -> Self {
     block_timer!("aliases");
-    let body = &body_with_facts.body;
+    let body = &body_with_facts.simplified_body();
 
     let location_domain = LocationDomain::new(body);
 

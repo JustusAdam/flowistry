@@ -203,7 +203,7 @@ mod test {
       x = 5;
     }"#;
     test_utils::compile_body(input, move |tcx, _, body_with_facts| {
-      let body = &body_with_facts.body;
+      let body = &body_with_facts.simplified_body();
       let control_deps = ControlDependencies::build(body);
 
       let mut snippet_to_loc: HashMap<_, Vec<_>> = HashMap::default();

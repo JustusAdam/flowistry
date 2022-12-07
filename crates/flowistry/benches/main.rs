@@ -13,7 +13,7 @@ use criterion::{
 };
 use flowistry::{
   infoflow::Direction,
-  mir::{borrowck_facts, utils::PlaceExt},
+  mir::{borrowck_facts::{self, CachedSimplifedBodyWithFacts}, utils::PlaceExt},
 };
 use glob::glob;
 use rustc_borrowck::BodyWithBorrowckFacts;
@@ -32,14 +32,14 @@ enum AnalysisType {
 fn analysis<'tcx>(
   tcx: TyCtxt<'tcx>,
   body_id: BodyId,
-  body_with_facts: &BodyWithBorrowckFacts<'tcx>,
+  body_with_facts: &CachedSimplifedBodyWithFacts<'tcx>,
   ty: AnalysisType,
 ) {
   let results = flowistry::infoflow::compute_flow(tcx, body_id, body_with_facts);
 
   if ty == AnalysisType::FlowAndDeps {
     let targets = body_with_facts
-      .body
+      .simplified_body()
       .local_decls
       .indices()
       .map(|local| {
