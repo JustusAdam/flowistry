@@ -159,8 +159,11 @@ rustc_index::newtype_index! {
   }
 }
 
+extern crate polonius_engine;
+type BorrowckLocationIndex = <rustc_borrowck::consumers::RustcFacts as polonius_engine::FactTypes>::Point;
+
 impl<'a, 'tcx> Aliases<'a, 'tcx> {
-  fn compute_loans<F: Fn(RegionVid, RegionVid) -> bool>(
+  fn compute_loans<F: Fn(RegionVid, RegionVid, BorrowckLocationIndex) -> bool>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
     body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
@@ -174,7 +177,7 @@ impl<'a, 'tcx> Aliases<'a, 'tcx> {
       body_with_facts.input_facts.subset_base
       .iter()
       .cloned()
-      .filter(|(r1, r2, _)| constraint_selector(*r1, *r2))
+      .filter(|(r1, r2, i)| constraint_selector(*r1, *r2, *i))
       .collect::<Vec<_>>();
     // Might be able to cut off propagation by deleting from the base set of facts here or as appropriate.
     // rustc will have a pass like the one I want already, can use their code, augmented as needed.
@@ -407,10 +410,10 @@ impl<'a, 'tcx> Aliases<'a, 'tcx> {
     def_id: DefId,
     body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
   ) -> Self {
-    Self::build_with_fact_selection(tcx, def_id, body_with_facts, |_, _| true)
+    Self::build_with_fact_selection(tcx, def_id, body_with_facts, |_, _, _| true)
   }
 
-  pub fn build_with_fact_selection<F: Fn(RegionVid, RegionVid) -> bool>(
+  pub fn build_with_fact_selection<F: Fn(RegionVid, RegionVid, BorrowckLocationIndex) -> bool>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
     body_with_facts: &'a BodyWithBorrowckFacts<'tcx>,
