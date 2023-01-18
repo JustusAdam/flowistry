@@ -59,6 +59,8 @@ pub struct RustcPluginArgs<Args> {
   pub args: Args,
   pub flags: Option<Vec<String>>,
   pub file: Option<PathBuf>,
+  /// Additional arguments that are passed to the `cargo` command verbatim
+  pub cargo_args: Vec<String>,
 }
 
 pub trait RustcPlugin: Sized {
@@ -106,7 +108,8 @@ pub fn cli_main<T: RustcPlugin>(plugin: T) {
   cmd
     .env("RUSTC_WORKSPACE_WRAPPER", path)
     .args(&["check", "-q", "--target-dir"])
-    .arg(target_dir);
+    .arg(target_dir)
+    .args(&args.cargo_args);
 
   let workspace_members = metadata
     .workspace_members
