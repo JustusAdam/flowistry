@@ -66,6 +66,9 @@ pub trait FlowDomain<'tcx>: JoinSemiLattice + Clone {
   ) -> bool;
   fn from_location_domain(dom: &Rc<LocationDomain>) -> Self;
   fn include(&mut self, row: Place<'tcx>, at: Location) -> bool;
+  fn mutated_values_for(aliases: &Aliases<'_, 'tcx>, place: Place<'tcx>) -> HashSet<Place<'tcx>> {
+    aliases.conflicts(place).to_owned()
+  }
 }
 
 impl<'tcx> FlowDomain<'tcx> for TransitiveFlowDomain<'tcx> {
@@ -120,6 +123,9 @@ impl<'tcx> FlowDomain<'tcx> for NonTransitiveFlowDomain<'tcx> {
   }
   fn include(&mut self, row: Place<'tcx>, at: Location) -> bool {
     self.override_(row, at)
+  }
+  fn mutated_values_for(aliases: &Aliases<'_, 'tcx>, place: Place<'tcx>) -> HashSet<Place<'tcx>> {
+    aliases.children(place)
   }
 }
 
@@ -279,7 +285,7 @@ impl<'a, 'tcx, D: FlowDomain<'tcx>> FlowAnalysis<'a, 'tcx, D> {
       );
     } else {
       // Union dependencies into all conflicting places of the mutated place
-      let mut mutable_conflicts = all_aliases.conflicts(mutated).to_owned();
+      let mut mutable_conflicts = D::mutated_values_for(all_aliases, mutated);
 
       // Remove any conflicts that aren't actually mutable, e.g. if x : &T ends up
       // as an alias of y: &mut T. See test function_lifetime_alias_mut for an example.
