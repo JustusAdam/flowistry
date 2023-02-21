@@ -98,19 +98,31 @@ impl<'tcx> Visitor<'tcx> for FindPlaces<'_, 'tcx> {
     }
 
     // See PlaceCollector for where this matters
-    if let Rvalue::Aggregate(box AggregateKind::Adt(def_id, idx, substs, _, _), _) =
-      rvalue
-    {
-      let adt_def = self.tcx.adt_def(*def_id);
-      let variant = adt_def.variant(*idx);
-      let places = variant.fields.iter().enumerate().map(|(i, field)| {
-        let mut projection = place.projection.to_vec();
-        projection.push(ProjectionElem::Field(
-          Field::from_usize(i),
-          field.ty(self.tcx, substs),
-        ));
-        Place::make(place.local, &projection, self.tcx)
-      });
+    if let Rvalue::Aggregate(box agg_k, _) = rvalue {
+      let places = match agg_k {
+        AggregateKind::Adt(def_id, idx, substs, _, _) => {
+          let adt_def = self.tcx.adt_def(*def_id);
+          let variant = adt_def.variant(*idx);
+          let places = variant.fields.iter().enumerate().map(|(i, field)| {
+            let mut projection = place.projection.to_vec();
+            projection.push(ProjectionElem::Field(
+              Field::from_usize(i),
+              field.ty(self.tcx, substs),
+            ));
+            Place::make(place.local, &projection, self.tcx)
+          });
+          Box::new(places) as Box<dyn Iterator<Item=Place<'tcx>>>
+        }
+        AggregateKind::Generator(def_id, _, _) => {
+          let gen_def = self.tcx.generator_layout(*def_id).unwrap();
+          let variant = gen_def.variant_fields.raw.first().unwrap();
+          let places = variant.iter_enumerated().map(|(field, saved_local)| {
+            place.project_deeper(&[ProjectionElem::Field(field, gen_def.field_tys[*saved_local])], self.tcx)
+          });
+          Box::new(places) as Box<_>
+        }
+        _ => Box::new(std::iter::empty()),
+      };
       self.places.extend(places);
     }
   }
