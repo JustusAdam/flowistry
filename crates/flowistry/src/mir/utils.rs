@@ -120,6 +120,9 @@ impl PlaceRelation {
   }
 
   pub fn of<'tcx>(part_place: Place<'tcx>, whole_place: Place<'tcx>) -> Self {
+    Self::configurable_of(part_place, whole_place, true)
+  }
+  pub fn configurable_of<'tcx>(part_place: Place<'tcx>, whole_place: Place<'tcx>, deref_means_disjoint: bool) -> Self {
     let locals_match = part_place.local == whole_place.local;
     if !locals_match {
       return PlaceRelation::Disjoint;
@@ -149,7 +152,8 @@ impl PlaceRelation {
       &whole_place.projection[part_place.projection.len() ..]
     };
 
-    if remaining_projection
+    if deref_means_disjoint &&
+      remaining_projection
       .iter()
       .any(|elem| matches!(elem, ProjectionElem::Deref))
     {
