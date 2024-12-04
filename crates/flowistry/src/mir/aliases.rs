@@ -71,12 +71,12 @@ rustc_index::newtype_index! {
 
 impl<'tcx> Aliases<'tcx> {
   /// Runs the alias analysis on a given `body_with_facts`.
-  pub fn build(
+  pub fn build<'a>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
-    input: impl FlowistryInput<'tcx>,
+    input: impl FlowistryInput<'tcx, 'a>,
   ) -> Self {
-    let loans = Self::compute_loans(tcx, def_id, input, |_, _, _| true);
+    let loans = Self::compute_loans(tcx, def_id, input);
     Aliases {
       tcx,
       body: input.body(),
@@ -84,37 +84,14 @@ impl<'tcx> Aliases<'tcx> {
     }
   }
 
-  /// Alternative constructor if you need to filter out certain borrowck facts.
-  ///
-  /// Just use [`Aliases::build`] unless you know what you're doing.
-  pub fn build_with_fact_selection(
+  fn compute_loans<'a>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
-    input: impl FlowistryInput<'tcx>,
-    selector: impl Fn(RegionVid, RegionVid, BorrowckLocationIndex) -> bool,
-  ) -> Self {
-    let loans = Self::compute_loans(tcx, def_id, input, selector);
-    Aliases {
-      tcx,
-      body: input.body(),
-      loans,
-    }
-  }
-
-  fn compute_loans(
-    tcx: TyCtxt<'tcx>,
-    def_id: DefId,
-    input: impl FlowistryInput<'tcx>,
-    constraint_selector: impl Fn(RegionVid, RegionVid, BorrowckLocationIndex) -> bool,
+    input: impl FlowistryInput<'tcx, 'a>,
   ) -> LoanMap<'tcx> {
     let start = Instant::now();
     let body = input.body();
     let static_region = RegionVid::from_usize(0);
-    let subset_base = input
-      .input_facts_subset_base()
-      .iter()
-      .filter(|(r1, r2, i)| constraint_selector(*r1, *r2, *i))
-      .collect::<Vec<_>>();
 
     let all_pointers = body
       .local_decls()
@@ -126,7 +103,11 @@ impl<'tcx> Aliases<'tcx> {
     let max_region = all_pointers
       .iter()
       .map(|(region, _)| *region)
-      .chain(subset_base.iter().flat_map(|(r1, r2, _)| [*r1, *r2]))
+      .chain(
+        input
+          .input_facts_subset_base()
+          .flat_map(|(r1, r2)| [r1, r2]),
+      )
       .filter(|r| *r != UNKNOWN_REGION)
       .max()
       .unwrap_or(static_region);
@@ -139,11 +120,11 @@ impl<'tcx> Aliases<'tcx> {
     let ignore_regions = async_hack.ignore_regions();
 
     // subset('a, 'b) :- subset_base('a, 'b, _).
-    for (a, b, _) in subset_base {
-      if ignore_regions.contains(a) || ignore_regions.contains(b) {
+    for (a, b) in input.input_facts_subset_base() {
+      if ignore_regions.contains(&a) || ignore_regions.contains(&b) {
         continue;
       }
-      subset.insert(*a, *b);
+      subset.insert(a, b);
     }
 
     // subset('static, 'a).

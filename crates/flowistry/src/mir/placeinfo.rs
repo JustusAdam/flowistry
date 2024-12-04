@@ -55,18 +55,18 @@ impl<'tcx> PlaceInfo<'tcx> {
   }
 
   /// Computes all the metadata about places used within the infoflow analysis.
-  pub fn build(
+  pub fn build<'a>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
-    input: impl FlowistryInput<'tcx>,
+    input: impl FlowistryInput<'tcx, 'a>,
   ) -> Self {
     Self::build_from_input_facts(tcx, def_id, input)
   }
   /// Computes all the metadata about places used within the infoflow analysis.
-  pub fn build_from_input_facts(
+  pub fn build_from_input_facts<'a>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
-    input: impl FlowistryInput<'tcx>,
+    input: impl FlowistryInput<'tcx, 'a>,
   ) -> Self {
     block_timer!("aliases");
     let body = input.body();
