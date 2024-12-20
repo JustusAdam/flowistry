@@ -1,9 +1,8 @@
 //! Infrastructure for analyzing MIR that supports the information flow analysis.
 
-use polonius_engine::FactTypes;
-use rustc_ast::token::TokenKind::FatArrow;
-use rustc_borrowck::consumers::{BodyWithBorrowckFacts, RustcFacts};
+use rustc_borrowck::consumers::BodyWithBorrowckFacts;
 use rustc_middle::mir::Body;
+use rustc_type_ir::RegionVid;
 
 pub mod aliases;
 pub mod engine;
@@ -17,14 +16,7 @@ pub trait FlowistryInput<'tcx, 'a>: Copy {
   fn body(self) -> &'tcx Body<'tcx>;
   fn input_facts_subset_base(
     self,
-  ) -> Box<
-    dyn Iterator<
-        Item = (
-          <RustcFacts as FactTypes>::Origin,
-          <RustcFacts as FactTypes>::Origin,
-        ),
-      > + 'a,
-  >;
+  ) -> Box<dyn Iterator<Item = (RegionVid, RegionVid)> + 'a>;
 }
 
 impl<'tcx> FlowistryInput<'tcx, 'tcx> for &'tcx BodyWithBorrowckFacts<'tcx> {
@@ -34,14 +26,7 @@ impl<'tcx> FlowistryInput<'tcx, 'tcx> for &'tcx BodyWithBorrowckFacts<'tcx> {
 
   fn input_facts_subset_base(
     self,
-  ) -> Box<
-    dyn Iterator<
-        Item = (
-          <RustcFacts as FactTypes>::Origin,
-          <RustcFacts as FactTypes>::Origin,
-        ),
-      > + 'tcx,
-  > {
+  ) -> Box<dyn Iterator<Item = (RegionVid, RegionVid)> + 'tcx> {
     Box::new(
       self
         .input_facts
@@ -49,7 +34,7 @@ impl<'tcx> FlowistryInput<'tcx, 'tcx> for &'tcx BodyWithBorrowckFacts<'tcx> {
         .unwrap()
         .subset_base
         .iter()
-        .map(|(r1, r2, _)| (*r1, *r2)),
+        .map(|&(r1, r2, _)| (r1.into(), r2.into())),
     )
   }
 }
