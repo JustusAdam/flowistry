@@ -3,7 +3,8 @@
 use std::{ops::ControlFlow, rc::Rc};
 
 use indexical::ToIndex;
-use rustc_borrowck::consumers::BodyWithBorrowckFacts;
+use polonius_engine::AllFacts;
+use rustc_borrowck::consumers::{BodyWithBorrowckFacts, PoloniusInput};
 use rustc_hir::def_id::DefId;
 use rustc_middle::{
   mir::*,
@@ -15,6 +16,7 @@ use rustc_utils::{
   block_timer,
   cache::{Cache, CopyCache},
   mir::{
+    body,
     location_or_arg::{
       index::{LocationOrArgDomain, LocationOrArgIndex},
       LocationOrArg,
@@ -24,14 +26,14 @@ use rustc_utils::{
   BodyExt, MutabilityExt, PlaceExt,
 };
 
-use super::{aliases::Aliases, utils::PlaceSet};
+use super::{aliases::Aliases, utils::PlaceSet, FlowistryInput};
 use crate::extensions::{is_extension_active, MutabilityMode};
 
 /// Utilities for analyzing places: children, aliases, etc.
 pub struct PlaceInfo<'tcx> {
-  pub(crate) tcx: TyCtxt<'tcx>,
-  pub(crate) body: &'tcx Body<'tcx>,
-  pub(crate) def_id: DefId,
+  pub tcx: TyCtxt<'tcx>,
+  pub body: &'tcx Body<'tcx>,
+  pub def_id: DefId,
   location_domain: Rc<LocationOrArgDomain>,
 
   // Core computed data structure
@@ -53,15 +55,23 @@ impl<'tcx> PlaceInfo<'tcx> {
   }
 
   /// Computes all the metadata about places used within the infoflow analysis.
-  pub fn build(
+  pub fn build<'a>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
-    body_with_facts: &'tcx BodyWithBorrowckFacts<'tcx>,
+    input: impl FlowistryInput<'tcx, 'a>,
+  ) -> Self {
+    Self::build_from_input_facts(tcx, def_id, input)
+  }
+  /// Computes all the metadata about places used within the infoflow analysis.
+  pub fn build_from_input_facts<'a>(
+    tcx: TyCtxt<'tcx>,
+    def_id: DefId,
+    input: impl FlowistryInput<'tcx, 'a>,
   ) -> Self {
     block_timer!("aliases");
-    let body = &body_with_facts.body;
+    let body = input.body();
     let location_domain = Self::build_location_arg_domain(body);
-    let aliases = Aliases::build(tcx, def_id, body_with_facts);
+    let aliases = Aliases::build(tcx, def_id, input);
 
     PlaceInfo {
       aliases,
@@ -155,7 +165,8 @@ impl<'tcx> PlaceInfo<'tcx> {
         .into_iter()
         .chain([place])
         .filter(|place| {
-          if let Some((place, _)) = place.refs_in_projection(self.body, self.tcx).last() {
+          if let Some((place, _)) = place.refs_in_projection(&self.body, self.tcx).last()
+          {
             let ty = place.ty(self.body.local_decls(), self.tcx).ty;
             if ty.is_box() || ty.is_unsafe_ptr() {
               return true;

@@ -3,7 +3,8 @@
 use std::{hash::Hash, time::Instant};
 
 use log::{debug, info};
-use rustc_borrowck::consumers::BodyWithBorrowckFacts;
+use polonius_engine::AllFacts;
+use rustc_borrowck::consumers::{BodyWithBorrowckFacts, PoloniusInput};
 use rustc_data_structures::{
   fx::{FxHashMap as HashMap, FxHashSet as HashSet},
   graph::{iterate::reverse_post_order, scc::Sccs, vec_graph::VecGraph},
@@ -20,6 +21,7 @@ use rustc_middle::{
 };
 use rustc_utils::{mir::place::UNKNOWN_REGION, timer::elapsed, PlaceExt};
 
+use super::FlowistryInput;
 use crate::{
   extensions::{is_extension_active, PointerMode},
   mir::utils::{AsyncHack, PlaceSet},
@@ -70,53 +72,27 @@ rustc_index::newtype_index! {
 
 impl<'tcx> Aliases<'tcx> {
   /// Runs the alias analysis on a given `body_with_facts`.
-  pub fn build(
+  pub fn build<'a>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
-    body_with_facts: &'tcx BodyWithBorrowckFacts<'tcx>,
+    input: impl FlowistryInput<'tcx, 'a>,
   ) -> Self {
-    let loans = Self::compute_loans(tcx, def_id, body_with_facts, |_, _, _| true);
+    let loans = Self::compute_loans(tcx, def_id, input);
     Aliases {
       tcx,
-      body: &body_with_facts.body,
+      body: input.body(),
       loans,
     }
   }
 
-  /// Alternative constructor if you need to filter out certain borrowck facts.
-  ///
-  /// Just use [`Aliases::build`] unless you know what you're doing.
-  pub fn build_with_fact_selection(
+  fn compute_loans<'a>(
     tcx: TyCtxt<'tcx>,
     def_id: DefId,
-    body_with_facts: &'tcx BodyWithBorrowckFacts<'tcx>,
-    selector: impl Fn(RegionVid, RegionVid, BorrowckLocationIndex) -> bool,
-  ) -> Self {
-    let loans = Self::compute_loans(tcx, def_id, body_with_facts, selector);
-    Aliases {
-      tcx,
-      body: &body_with_facts.body,
-      loans,
-    }
-  }
-
-  fn compute_loans(
-    tcx: TyCtxt<'tcx>,
-    def_id: DefId,
-    body_with_facts: &'tcx BodyWithBorrowckFacts<'tcx>,
-    constraint_selector: impl Fn(RegionVid, RegionVid, BorrowckLocationIndex) -> bool,
+    input: impl FlowistryInput<'tcx, 'a>,
   ) -> LoanMap<'tcx> {
     let start = Instant::now();
-    let body = &body_with_facts.body;
+    let body = input.body();
     let static_region = RegionVid::from_usize(0);
-    let input_facts = &body_with_facts.input_facts.as_ref().unwrap();
-    let subset_base = input_facts
-      .subset_base
-      .iter()
-      .cloned()
-      .map(|(r1, r2, i)| (RegionVid::from(r1), RegionVid::from(r2), i))
-      .filter(|(r1, r2, i)| constraint_selector(*r1, *r2, *i))
-      .collect::<Vec<_>>();
 
     let all_pointers = body
       .local_decls()
@@ -128,7 +104,11 @@ impl<'tcx> Aliases<'tcx> {
     let max_region = all_pointers
       .iter()
       .map(|(region, _)| *region)
-      .chain(subset_base.iter().flat_map(|(r1, r2, _)| [*r1, *r2]))
+      .chain(
+        input
+          .input_facts_subset_base()
+          .flat_map(|(r1, r2)| [r1, r2]),
+      )
       .filter(|r| *r != UNKNOWN_REGION)
       .max()
       .unwrap_or(static_region);
@@ -141,7 +121,7 @@ impl<'tcx> Aliases<'tcx> {
     let ignore_regions = async_hack.ignore_regions();
 
     // subset('a, 'b) :- subset_base('a, 'b, _).
-    for (a, b, _) in subset_base {
+    for (a, b) in input.input_facts_subset_base() {
       if ignore_regions.contains(&a) || ignore_regions.contains(&b) {
         continue;
       }
@@ -165,11 +145,7 @@ impl<'tcx> Aliases<'tcx> {
         }
       }
 
-      let constraints = generate_conservative_constraints(
-        tcx,
-        &body_with_facts.body,
-        &region_to_pointers,
-      );
+      let constraints = generate_conservative_constraints(tcx, body, &region_to_pointers);
 
       for (a, b) in constraints {
         subset.insert(a, b);
@@ -370,17 +346,18 @@ impl<'tcx> Aliases<'tcx> {
   pub fn aliases(&self, place: Place<'tcx>) -> PlaceSet<'tcx> {
     let mut aliases = HashSet::default();
 
-    // Places with no derefs, or derefs from arguments, have no aliases
-    if place.is_direct(self.body, self.tcx) {
-      // Note: this also added the place itself to the set in a previous version
+    // Argument places can be indirect
+    if place.is_arg(self.body) {
+      aliases.insert(place);
       return aliases;
     }
 
     // place = after[*ptr]
-    let (ptr, after) = place
-      .refs_in_projection(self.body, self.tcx)
-      .last()
-      .unwrap();
+    let Some((ptr, after)) = place.refs_in_projection(&self.body, self.tcx).last() else {
+      // This is a direct place
+      aliases.insert(place);
+      return aliases;
+    };
 
     // ptr : &'region orig_ty
     let ptr_ty = ptr.ty(self.body.local_decls(), self.tcx).ty;
