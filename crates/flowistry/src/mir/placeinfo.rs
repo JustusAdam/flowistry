@@ -76,6 +76,10 @@ impl<'tcx> PlaceInfo<'tcx> {
     }
   }
 
+  pub fn body(&self) -> &'tcx Body<'tcx> {
+    self.body
+  }
+
   /// Normalizes a place via [`PlaceExt::normalize`] (cached).
   ///
   /// See the `PlaceExt` documentation for details on how normalization works.

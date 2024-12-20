@@ -56,7 +56,7 @@ pub fn compile(
   callback: impl for<'tcx> FnOnce(TyCtxt<'tcx>) + Send,
 ) {
   borrowck_facts::enable_mir_simplification();
-  test_utils::compile(input, callback)
+  test_utils::CompileBuilder::new(input).compile(|res| callback(res.tcx))
 }
 
 pub fn bless(
