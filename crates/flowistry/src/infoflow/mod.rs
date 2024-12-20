@@ -63,7 +63,7 @@ pub type FlowResults<'tcx> = engine::AnalysisResults<'tcx, FlowAnalysis<'tcx>>;
 
 thread_local! {
   pub(super) static BODY_STACK: RefCell<Vec<BodyId>> =
-    RefCell::new(Vec::new());
+    const { RefCell::new(Vec::new()) };
 }
 
 /// Computes information flow for a MIR body.
@@ -83,11 +83,6 @@ pub fn compute_flow<'tcx>(
 ) -> FlowResults<'tcx> {
   BODY_STACK.with(|body_stack| {
     body_stack.borrow_mut().push(body_id);
-    debug!(
-      "{}",
-      rustc_hir_pretty::to_string(rustc_hir_pretty::NO_ANN, |s| s
-        .print_expr(tcx.hir().body(body_id).value))
-    );
     debug!("{}", body_with_facts.body.to_string(tcx).unwrap());
 
     let def_id = tcx.hir().body_owner_def_id(body_id).to_def_id();

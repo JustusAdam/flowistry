@@ -15,13 +15,13 @@ use std::rc::Rc;
 
 use either::Either;
 use indexical::ToIndex;
-use rustc_data_structures::{graph::WithSuccessors, work_queue::WorkQueue};
+use rustc_data_structures::{graph::Successors, work_queue::WorkQueue};
 use rustc_index::IndexVec;
 use rustc_middle::{
   mir::{traversal, Body, Location},
   ty::TyCtxt,
 };
-use rustc_mir_dataflow::{Analysis, Direction, JoinSemiLattice, ResultsVisitor};
+use rustc_mir_dataflow::{Analysis, Direction, JoinSemiLattice};
 use rustc_utils::{
   mir::location_or_arg::{
     index::{LocationOrArgDomain, LocationOrArgIndex},
@@ -36,47 +36,10 @@ pub struct AnalysisResults<'tcx, A: Analysis<'tcx>> {
   /// The underlying analysis that was used to generate the results.
   pub analysis: A,
   location_domain: Rc<LocationOrArgDomain>,
-  state: IndexVec<LocationOrArgIndex, A::Domain>,
+  state: IndexVec<LocationOrArgIndex, Rc<A::Domain>>,
 }
 
 impl<'tcx, A: Analysis<'tcx>> AnalysisResults<'tcx, A> {
-  /// Same as [`rustc_mir_dataflow::Results::visit_reachable_with`](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_mir_dataflow/struct.Results.html#method.visit_reachable_with).
-  pub fn visit_reachable_with<'mir, V>(&self, body: &'mir Body<'tcx>, visitor: &mut V)
-  where
-    V: ResultsVisitor<'mir, 'tcx, Self, FlowState = A::Domain>,
-  {
-    for (block, data) in traversal::reachable(body) {
-      for statement_index in 0 ..= data.statements.len() {
-        let location = Location {
-          block,
-          statement_index,
-        };
-        let loc_index = location.to_index(&self.location_domain);
-        let state = &self.state[loc_index];
-
-        if statement_index == 0 {
-          visitor.visit_block_start(self, state, data, block);
-        }
-
-        if statement_index == data.statements.len() {
-          visitor.visit_terminator_after_primary_effect(
-            self,
-            state,
-            data.terminator(),
-            location,
-          )
-        } else {
-          visitor.visit_statement_after_primary_effect(
-            self,
-            state,
-            &data.statements[statement_index],
-            location,
-          )
-        }
-      }
-    }
-  }
-
   /// Gets the computed [`AnalysisDomain`](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_mir_dataflow/trait.AnalysisDomain.html)
   /// at a given [`Location`].
   pub fn state_at(&self, location: Location) -> &A::Domain {
@@ -122,11 +85,19 @@ pub fn iterate_to_fixpoint<'tcx, A: Analysis<'tcx>>(
     };
     let next_locs = match body.stmt_at(location) {
       Either::Left(statement) => {
-        analysis.apply_statement_effect(&mut state[loc_index], statement, location);
+        analysis.apply_primary_statement_effect(
+          &mut state[loc_index],
+          statement,
+          location,
+        );
         vec![location.successor_within_block()]
       }
       Either::Right(terminator) => {
-        analysis.apply_terminator_effect(&mut state[loc_index], terminator, location);
+        analysis.apply_primary_terminator_effect(
+          &mut state[loc_index],
+          terminator,
+          location,
+        );
         body
           .basic_blocks
           .successors(location.block)
@@ -147,6 +118,8 @@ pub fn iterate_to_fixpoint<'tcx, A: Analysis<'tcx>>(
       }
     }
   }
+
+  let state = state.into_iter().map(Rc::new).collect();
 
   AnalysisResults {
     analysis,
