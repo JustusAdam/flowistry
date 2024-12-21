@@ -27,9 +27,6 @@ use crate::{
   mir::utils::{AsyncHack, PlaceSet},
 };
 
-type BorrowckLocationIndex =
-  <rustc_borrowck::consumers::RustcFacts as crate::polonius_engine::FactTypes>::Point;
-
 #[derive(Default)]
 struct GatherBorrows<'tcx> {
   borrows: Vec<(RegionVid, BorrowKind, Place<'tcx>)>,
