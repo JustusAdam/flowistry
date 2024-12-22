@@ -34,16 +34,18 @@ pub fn compile_body_with_range(
     + Send,
 ) {
   borrowck_facts::enable_mir_simplification();
-  CompileBuilder::new(input).compile(|result| {
-    let target = compute_target();
-    let tcx = result.tcx;
-    let (body_id, body_with_facts) = result.as_body_with_range(target);
-    callback(tcx, body_id, body_with_facts, target)
-  })
+  CompileBuilder::new(input)
+    .compile(|result| {
+      let target = compute_target();
+      let tcx = result.tcx;
+      let (body_id, body_with_facts) = result.as_body_with_range(target);
+      callback(tcx, body_id, body_with_facts, target)
+    })
+    .unwrap()
 }
 
 pub fn compile_body(
-  input: impl Into<String>,
+  input: &str,
   callback: impl for<'tcx> FnOnce(TyCtxt<'tcx>, BodyId, &'tcx BodyWithBorrowckFacts<'tcx>)
     + Send,
 ) {
@@ -56,7 +58,9 @@ pub fn compile(
   callback: impl for<'tcx> FnOnce(TyCtxt<'tcx>) + Send,
 ) {
   borrowck_facts::enable_mir_simplification();
-  test_utils::CompileBuilder::new(input).compile(|res| callback(res.tcx))
+  test_utils::CompileBuilder::new(input)
+    .compile(|res| callback(res.tcx))
+    .unwrap()
 }
 
 pub fn bless(
